@@ -93,7 +93,7 @@ tr.hl{background:var(--amber-bg)}
     <tbody id="body"></tbody></table></div>
 </div>
 
-<script src="ops-db.js?v=4"></script>
+<script src="ops-db.js?v=5"></script>
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -180,6 +180,7 @@ function formChange(){
   const live=$('live');
   if(!f.start||!f.end||!f.devices){live.className='live ok';live.textContent='填寫時間與設備後，會即時顯示是否有衝突';return null}
   if(f.end<=f.start){live.className='live bad';live.textContent='結束時間必須晚於開始時間';return null}
+  if(!f.devices.split(/[,，]/).some(s=>s.trim())){live.className='live bad';live.textContent='請至少填寫一個影響設備';return null}
   const c={id:-1,title:f.title,start:f.start,end:f.end,devices:f.devices,risk:f.risk,owner:f.owner};
   const r=check(c,changes), msgs=[];
   r.dev.forEach(x=>msgs.push(`與「${x.o.title}」共用 ${x.shared.join('/')}，時間重疊`));
