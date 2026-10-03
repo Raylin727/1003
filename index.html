@@ -16,9 +16,9 @@ nav{display:flex;gap:2px;overflow-x:auto;flex:1}
 nav a{padding:12px 12px;color:var(--muted);text-decoration:none;white-space:nowrap;border-bottom:2px solid transparent}
 nav a:hover{color:var(--text)}
 nav a.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
-.db{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap;padding:0 6px}
+.db{display:none;font-size:12px;color:var(--muted);align-items:center;gap:6px;white-space:nowrap;padding:0 6px}
 .db i{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
-.db.ok i{background:var(--ok)}.db.bad i{background:var(--bad)}
+.db.bad{display:flex}.db.bad i{background:var(--bad)}
 @media(max-width:700px){.brand{flex:1}nav{order:3;flex-basis:100%}}
 iframe{flex:1;width:100%;border:0;background:var(--bg)}
 </style>
@@ -27,7 +27,7 @@ iframe{flex:1;width:100%;border:0;background:var(--bg)}
 <header>
   <div class="brand">🛠 網路維運工具箱</div>
   <nav id="nav"></nav>
-  <div class="db" id="db"><i></i><span>連線中…</span></div>
+  <div class="db" id="db"><i></i><span></span></div>
 </header>
 <iframe id="frame" title="工具內容"></iframe>
 
@@ -51,11 +51,12 @@ function go(){
 }
 window.addEventListener('hashchange',go); go();
 
-// 資料庫連線狀態
+// 只有在連不上資料庫時才提示（正常連線時不顯示任何技術訊息）
 OPS.select('ops_devices','select=id&limit=1').then(r=>{
+  if(r) return;
   const el=document.getElementById('db');
-  el.className='db '+(r?'ok':'bad');
-  el.querySelector('span').textContent = r ? 'Supabase 已連線' : '離線（使用內建示範資料）';
+  el.className='db bad';
+  el.querySelector('span').textContent='離線模式：顯示示範資料，修改不會儲存';
 });
 </script>
 </body>

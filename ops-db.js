@@ -44,14 +44,13 @@
         return true;
       } catch (e) { console.warn('[ops-db] delete 失敗：', table, e); return false; }
     },
-    // 在頁首副標題後面標示資料來源
+    // 正常連線時不顯示任何訊息；只有連不上資料庫（改用內建示範資料）時才在副標題後提示
     mark() {
       const el = document.querySelector('.sub');
-      if (!el) return;
-      el.querySelector('.ops-src')?.remove();
+      if (!el || this.live) return;
       const s = document.createElement('span');
       s.className = 'ops-src';
-      s.textContent = this.live ? ' · 資料來源：Supabase ✓' : ' · 資料來源：內建示範資料（未連線，修改不會儲存）';
+      s.textContent = ' · 離線模式：顯示示範資料，修改不會儲存';
       s.style.fontWeight = '600';
       el.appendChild(s);
     },
