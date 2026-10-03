@@ -27,6 +27,16 @@
         return (await r.json())[0];
       } catch (e) { console.warn('[ops-db] insert 失敗：', table, e); return null; }
     },
+    // 一次新增多筆（單一請求），回傳實際儲存的列陣列；失敗回傳 null
+    async insertMany(table, rows) {
+      try {
+        const r = await fetch(`${URL_}/rest/v1/${table}`, {
+          method: 'POST', headers: { ...H, Prefer: 'return=representation' }, body: JSON.stringify(rows)
+        });
+        if (!r.ok) throw new Error(r.status + ' ' + (await r.text()));
+        return await r.json();
+      } catch (e) { console.warn('[ops-db] insertMany 失敗：', table, e); return null; }
+    },
     async patch(table, id, obj) {
       try {
         const r = await fetch(`${URL_}/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`, {

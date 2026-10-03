@@ -80,7 +80,7 @@ td input{width:100%;min-width:90px;padding:4px 8px}
   </div>
 </div>
 
-<script src="ops-db.js?v=3"></script>
+<script src="ops-db.js?v=4"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -219,13 +219,19 @@ $('splitBody').addEventListener('click',async e=>{
   $('vlanBody').lastElementChild.scrollIntoView({behavior:'smooth',block:'center'});
 });
 $('addVlan').onclick=()=>pushVlan({id:'',name:'',cidr:'',use:''});
+let resetting=false;   // 避免連點造成重複寫入
 $('resetVlan').onclick=async()=>{
-  const fresh=demoVlans.map(v=>({id:v[0],name:v[1],cidr:v[2],use:v[3]}));
-  if(OPS.live){
-    if(!(await OPS.remove(TBL,'id=gt.0'))) return OPS.fail('還原失敗');
-    for(const [i,v] of fresh.entries()){ const row=await OPS.insert(TBL,dbRow(v,i)); if(row) v.pk=row.id; }
-  }
-  vlans=fresh; renderVlans();
+  if(resetting) return; resetting=true; $('resetVlan').disabled=true;
+  try{
+    const fresh=demoVlans.map(v=>({id:v[0],name:v[1],cidr:v[2],use:v[3]}));
+    if(OPS.live){
+      if(!(await OPS.remove(TBL,'id=gt.0'))) return OPS.fail('還原失敗');
+      const saved=await OPS.insertMany(TBL,fresh.map(dbRow));   // 一次寫入，不會被中途打斷
+      if(!saved) return OPS.fail('還原失敗');
+      saved.forEach((row,i)=>fresh[i].pk=row.id);
+    }
+    vlans=fresh; renderVlans();
+  } finally { resetting=false; $('resetVlan').disabled=false; }
 };
 $('calcBtn').onclick=calc; $('splitBtn').onclick=split;
 $('cidr').addEventListener('keydown',e=>{if(e.key==='Enter')calc()});
