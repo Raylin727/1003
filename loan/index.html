@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>資訊設備借用系統</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>資訊設備借用系統</h1>
+  <p class="sub">示範資料,請勿輸入真實個資</p>
+</header>
+<nav class="tabs">
+  <button type="button" id="tabItems" class="tab on">設備清單</button>
+  <button type="button" id="tabHist" class="tab">借用紀錄</button>
+</nav>
+<main>
+  <section id="overdue" class="banner" hidden></section>
+  <section class="stats" id="stats"></section>
+  <section class="filters">
+    <input id="q" type="search" placeholder="搜尋名稱或編號">
+    <select id="cat"><option value="">全部類別</option></select>
+    <select id="st">
+      <option value="">全部狀態</option>
+      <option value="available">可借用</option>
+      <option value="borrowed">已借出</option>
+      <option value="overdue">已逾期</option>
+    </select>
+  </section>
+  <section id="list" class="grid"></section>
+  <section id="hist" hidden>
+    <div class="filters">
+      <input id="hq" type="search" placeholder="搜尋設備、借用人或部門">
+      <select id="hst">
+        <option value="">全部</option><option value="out">未歸還</option><option value="done">已歸還</option>
+      </select>
+      <button type="button" id="csv" class="csvbtn">匯出 CSV</button>
+    </div>
+    <div class="tw"><table id="ht"></table></div>
+  </section>
+  <p id="msg" class="muted"></p>
+</main>
+
+<dialog id="dlg">
+  <form id="form" method="dialog">
+    <h2 id="dlgTitle">借用設備</h2>
+    <label>借用人姓名<input name="borrower" required maxlength="30"></label>
+    <label>部門<input name="dept" required maxlength="30"></label>
+    <label>預計歸還日<input name="due" type="date" required></label>
+    <div class="row">
+      <button type="button" id="cancel" class="ghost">取消</button>
+      <button type="submit" id="ok">確認借用</button>
+    </div>
+  </form>
+</dialog>
+<script src="app.js"></script>
+</body>
+</html>

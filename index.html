@@ -39,6 +39,7 @@ const TOOLS = [
   ['subnet','IP 子網規劃','subnet-planner.html'],
   ['ports','Port 配線圖','port-map.html'],
   ['change','變更排程','change-calendar.html'],
+  ['loan','設備借用','loan/index.html'],
 ];
 const nav = document.getElementById('nav'), frame = document.getElementById('frame');
 nav.innerHTML = TOOLS.map(([k,l])=>`<a href="#${k}" data-k="${k}">${l}</a>`).join('');
