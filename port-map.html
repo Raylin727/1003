@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>機櫃 Port 配線圖</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1d2330;--muted:#6b7385;--line:#e3e6ec;--accent:#2563eb;
+ --up:#1f8a4c;--down:#d9362b;--free:#b9c0cd;--dis:#e08a00;--hit:#f5b800}
+@media (prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1b2029;--text:#e8ebf2;--muted:#98a1b3;--line:#2b323f;--accent:#6b9bff;
+ --up:#3fb56e;--down:#ff7b72;--free:#4a5262;--dis:#f0b45a;--hit:#ffd23f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,"PingFang TC","Noto Sans TC",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 20px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:16px}
+.panel h2{font-size:15px;margin:0 0 10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
+.panel h2 small{font-weight:400;color:var(--muted)}
+input,select,button{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+.tools{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+input[type=search]{flex:1;min-width:220px}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);flex-wrap:wrap;margin-bottom:16px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.sw{overflow-x:auto;padding-bottom:4px}
+.ports{display:grid;grid-auto-flow:column;grid-template-rows:repeat(2,40px);gap:5px;width:max-content;background:var(--bg);padding:10px;border-radius:8px;border:1px solid var(--line)}
+.p{width:40px;height:40px;border-radius:5px;border:2px solid transparent;color:#fff;font-size:12px;font-weight:600;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center}
+.p.up{background:var(--up)}.p.down{background:var(--down)}.p.free{background:var(--free);color:var(--text)}.p.dis{background:var(--dis)}
+.p.dim{opacity:.22}
+.p.hit{border-color:var(--hit);box-shadow:0 0 0 2px var(--hit)}
+.p.sel{border-color:var(--text)}
+.detail{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.kv{background:var(--bg);border-radius:8px;padding:8px 12px}.kv small{display:block;color:var(--muted);font-size:12px}.kv b{font-size:15px}
+.hint{color:var(--muted)}
+.stat{display:flex;gap:18px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+.stat b{color:var(--text)}
+.results{margin-top:8px;font-size:13px;color:var(--muted)}
+.results a{color:var(--accent);cursor:pointer;margin-right:12px;text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>機櫃 Port 配線圖</h1>
+  <p class="sub">示範資料 · 以格狀圖顯示交換器 port 狀態，點擊查看對端資訊，可用線號或設備名稱反查</p>
+
+  <div class="tools">
+    <input type="search" id="q" placeholder="搜尋線號（如 A-3F-017）、設備、Patch panel 位置、VLAN…">
+    <select id="fSw"></select>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--up)"></i>已連線</span>
+    <span><i style="background:var(--down)"></i>異常 / Link down</span>
+    <span><i style="background:var(--dis)"></i>停用</span>
+    <span><i style="background:var(--free)"></i>空閒</span>
+    <span><i style="background:var(--hit);"></i>搜尋命中（黃框）</span>
+  </div>
+  <div class="results" id="results"></div>
+
+  <div class="panel" id="detailPanel">
+    <h2>Port 詳細資訊</h2>
+    <div id="detail" class="hint">點擊下方任一 port 查看資訊</div>
+  </div>
+
+  <div id="switches"></div>
+</div>
+
+<script src="ops-db.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// 示範資料
+const SWITCHES = [
+  {id:'SW-3F-01',model:'Aruba 2930F-48G',loc:'3F 機房 · 機櫃 R2 · U20',n:48},
+  {id:'SW-4F-01',model:'Aruba 2930F-24G',loc:'4F 機房 · 機櫃 R1 · U18',n:24},
+  {id:'CORE-01',model:'Cisco Catalyst 9500',loc:'總機房 · 機櫃 A1 · U10',n:24},
+];
+const ports = {};  // key: sw|n
+const add = (sw,n,o)=>ports[sw+'|'+n]={sw,n,status:'up',vlan:'',dev:'',panel:'',label:'',note:'',...ports[sw+'|'+n],...o};
+// 3F 接入交換器
+for(let i=1;i<=36;i++){
+  const kind = i<=24?['OFFICE',30,`3F 座位 PC-${String(i).padStart(2,'0')}`]:
+               i<=30?['VOICE',60,`IP 電話 ${i-24}`]:['OFFICE',30,`3F 印表機/其他 ${i-30}`];
+  add('SW-3F-01',i,{vlan:kind[1]+' '+kind[0],dev:kind[2],panel:`PP-3F-A / ${i}`,label:`A-3F-${String(i).padStart(3,'0')}`});
+}
+add('SW-3F-01',9,{status:'down',note:'使用者回報無網路，疑似跳線鬆脫（待現場確認）'});
+add('SW-3F-01',17,{status:'dis',dev:'(停用) 離職員工座位',note:'2026-09 離職，port 已 shutdown'});
+add('SW-3F-01',37,{vlan:'70 CCTV',dev:'攝影機 CAM-3F-01',panel:'PP-3F-B / 1',label:'B-3F-001'});
+add('SW-3F-01',38,{vlan:'70 CCTV',dev:'攝影機 CAM-3F-02',panel:'PP-3F-B / 2',label:'B-3F-002'});
+add('SW-3F-01',39,{vlan:'50 WIFI',dev:'AP-3F-01',panel:'PP-3F-B / 3',label:'B-3F-003'});
+add('SW-3F-01',40,{vlan:'50 WIFI',dev:'AP-3F-02',panel:'PP-3F-B / 4',label:'B-3F-004'});
+add('SW-3F-01',41,{vlan:'50 WIFI',dev:'AP-3F-03',panel:'PP-3F-B / 5',label:'B-3F-005'});
+add('SW-3F-01',47,{vlan:'Trunk',dev:'CORE-01 Te1/0/3',label:'FIBER-3F-01',note:'上行 10G 光纖'});
+add('SW-3F-01',48,{vlan:'Trunk',dev:'CORE-01 Te1/0/4',label:'FIBER-3F-02',note:'上行 10G 光纖（備援）'});
+// 4F
+for(let i=1;i<=16;i++) add('SW-4F-01',i,{vlan:'40 OFFICE',dev:`4F 座位 PC-${String(i).padStart(2,'0')}`,panel:`PP-4F-A / ${i}`,label:`A-4F-${String(i).padStart(3,'0')}`});
+add('SW-4F-01',5,{status:'down',note:'Link down 3 天，座位無人使用？'});
+add('SW-4F-01',17,{vlan:'50 WIFI',dev:'AP-4F-01',panel:'PP-4F-B / 1',label:'B-4F-001'});
+add('SW-4F-01',18,{vlan:'50 WIFI',dev:'AP-4F-02',panel:'PP-4F-B / 2',label:'B-4F-002'});
+add('SW-4F-01',23,{vlan:'Trunk',dev:'CORE-01 Te1/0/5',label:'FIBER-4F-01',note:'上行 10G 光纖'});
+// 核心
+add('CORE-01',1,{vlan:'Trunk',dev:'FW-HQ-01 port1',label:'C-001',note:'內網側'});
+add('CORE-01',2,{vlan:'Trunk',dev:'FW-HQ-02 port1',label:'C-002',note:'內網側（HA）'});
+add('CORE-01',3,{vlan:'Trunk',dev:'SW-3F-01 port 47',label:'FIBER-3F-01'});
+add('CORE-01',4,{vlan:'Trunk',dev:'SW-3F-01 port 48',label:'FIBER-3F-02'});
+add('CORE-01',5,{vlan:'Trunk',dev:'SW-4F-01 port 23',label:'FIBER-4F-01'});
+add('CORE-01',8,{vlan:'20 SERVER',dev:'NAS-01',label:'C-008'});
+add('CORE-01',9,{vlan:'20 SERVER',dev:'ERP-SRV-01',label:'C-009'});
+add('CORE-01',10,{vlan:'20 SERVER',dev:'ERP-SRV-02',label:'C-010'});
+add('CORE-01',11,{status:'down',vlan:'20 SERVER',dev:'DNS-APP-01',label:'C-011',note:'設備保固已過期；Link down 待查'});
+// 其餘空閒
+SWITCHES.forEach(s=>{for(let i=1;i<=s.n;i++) if(!ports[s.id+'|'+i]) add(s.id,i,{status:'free'});});
+
+const STATUS_TXT={up:'已連線',down:'異常 / Link down',dis:'停用',free:'空閒'};
+let sel=null, hits=new Set();
+
+function haystack(p){return [p.dev,p.vlan,p.panel,p.label,p.note,p.sw+' port '+p.n].join(' ').toLowerCase();}
+function render(){
+  const f=$('fSw').value, q=$('q').value.trim().toLowerCase();
+  hits=new Set();
+  if(q) Object.values(ports).forEach(p=>{ if(p.status!=='free' && haystack(p).includes(q)) hits.add(p.sw+'|'+p.n); });
+  const list=SWITCHES.filter(s=>!f||s.id===f);
+  $('switches').innerHTML=list.map(s=>{
+    const ps=Array.from({length:s.n},(_,i)=>ports[s.id+'|'+(i+1)]);
+    const cnt=k=>ps.filter(p=>p.status===k).length;
+    // 實體交換器上下排：上排奇數、下排偶數 → 用欄向排列
+    const order=[]; for(let c=0;c<Math.ceil(s.n/2);c++){order.push(ps[c*2]); if(ps[c*2+1]) order.push(ps[c*2+1]);}
+    return `<div class="panel"><h2><span>${s.id} <small>${s.model} · ${s.loc}</small></span>
+      <span class="stat"><span>已連線 <b>${cnt('up')}</b></span><span>異常 <b>${cnt('down')}</b></span><span>停用 <b>${cnt('dis')}</b></span><span>空閒 <b>${cnt('free')}</b> / ${s.n}</span></span></h2>
+      <div class="sw"><div class="ports">${order.map(p=>{
+        const k=p.sw+'|'+p.n, dim=q&&!hits.has(k);
+        return `<button class="p ${p.status} ${dim?'dim':''} ${hits.has(k)?'hit':''} ${sel===k?'sel':''}" data-k="${k}" title="${esc(p.dev||'空閒')}">${p.n}</button>`}).join('')}</div></div></div>`;
+  }).join('');
+  const r=$('results');
+  if(q){
+    const arr=[...hits];
+    r.innerHTML = arr.length ? `找到 ${arr.length} 個 port：` + arr.slice(0,12).map(k=>{const p=ports[k];return `<a data-k="${k}">${p.sw} #${p.n}</a>`}).join('')+(arr.length>12?'…':'') : '找不到符合的 port';
+  } else r.innerHTML='';
+}
+function showDetail(k){
+  sel=k; const p=ports[k];
+  const kv=(a,b)=>`<div class="kv"><small>${a}</small><b>${esc(b)||'—'}</b></div>`;
+  // 對端反查：以線號找同一條線的另一端
+  const peers=Object.values(ports).filter(o=>o!==p&&o.label&&o.label===p.label);
+  $('detail').className='detail';
+  $('detail').innerHTML = kv('交換器 / Port',`${p.sw} · port ${p.n}`)+kv('狀態',STATUS_TXT[p.status])+kv('連接設備',p.dev)+kv('VLAN',p.vlan)+
+    kv('Patch panel 位置',p.panel)+kv('線號標籤',p.label)+
+    (peers.length?kv('同線號另一端',peers.map(o=>`${o.sw} #${o.n}`).join('、')):'')+
+    `<div class="kv" style="grid-column:1/-1"><small>備註</small><b>${esc(p.note)||'—'}</b></div>`;
+  render();
+}
+$('switches').addEventListener('click',e=>{const b=e.target.closest('.p'); if(b) showDetail(b.dataset.k);});
+$('results').addEventListener('click',e=>{const a=e.target.closest('a'); if(a){showDetail(a.dataset.k);
+  document.querySelector(`[data-k="${a.dataset.k}"]`)?.scrollIntoView({block:'center',inline:'center',behavior:'smooth'});}});
+$('q').addEventListener('input',render);
+$('fSw').innerHTML='<option value="">全部交換器</option>'+SWITCHES.map(s=>`<option>${s.id}</option>`).join('');
+$('fSw').addEventListener('change',render);
+render();
+
+// 從 Supabase 載入交換器與 port 資料（唯讀）；失敗就沿用內建示範資料
+(async()=>{
+  const [sw,pt]=await Promise.all([OPS.select('ops_switches','order=id.asc'),OPS.select('ops_ports','order=switch_id.asc,port_no.asc&limit=2000')]);
+  if(sw&&pt){
+    SWITCHES.length=0;
+    ['SW-3F-01','SW-4F-01','CORE-01'].forEach(id=>{const s=sw.find(x=>x.id===id); if(s) SWITCHES.push({id:s.id,model:s.model,loc:s.location,n:s.port_count});});
+    sw.filter(x=>!SWITCHES.some(s=>s.id===x.id)).forEach(s=>SWITCHES.push({id:s.id,model:s.model,loc:s.location,n:s.port_count}));
+    Object.keys(ports).forEach(k=>delete ports[k]);
+    pt.forEach(p=>ports[p.switch_id+'|'+p.port_no]={sw:p.switch_id,n:p.port_no,status:p.status,vlan:p.vlan,dev:p.device,panel:p.panel,label:p.label,note:p.note});
+    sel=null; $('detail').className='hint'; $('detail').textContent='點擊下方任一 port 查看資訊';
+    $('fSw').innerHTML='<option value="">全部交換器</option>'+SWITCHES.map(s=>`<option>${s.id}</option>`).join('');
+    render();
+  }
+  OPS.mark();
+})();
+</script>
+</body>
+</html>

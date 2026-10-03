@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IT 網路維運工具箱</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1d2330;--muted:#6b7385;--line:#e3e6ec;--accent:#2563eb;--ok:#1f8a4c;--bad:#d9362b}
+@media (prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1b2029;--text:#e8ebf2;--muted:#98a1b3;--line:#2b323f;--accent:#6b9bff;--ok:#5fd08a;--bad:#ff7b72}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,"PingFang TC","Noto Sans TC",system-ui,sans-serif}
+header{background:var(--card);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:6px;padding:0 12px;flex-wrap:wrap}
+.brand{font-weight:700;font-size:15px;padding:12px 10px 12px 4px;white-space:nowrap}
+nav{display:flex;gap:2px;overflow-x:auto;flex:1}
+nav a{padding:12px 12px;color:var(--muted);text-decoration:none;white-space:nowrap;border-bottom:2px solid transparent}
+nav a:hover{color:var(--text)}
+nav a.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.db{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap;padding:0 6px}
+.db i{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+.db.ok i{background:var(--ok)}.db.bad i{background:var(--bad)}
+@media(max-width:700px){.brand{flex:1}nav{order:3;flex-basis:100%}}
+iframe{flex:1;width:100%;border:0;background:var(--bg)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">🛠 網路維運工具箱</div>
+  <nav id="nav"></nav>
+  <div class="db" id="db"><i></i><span>連線中…</span></div>
+</header>
+<iframe id="frame" title="工具內容"></iframe>
+
+<script src="ops-db.js"></script>
+<script>
+const TOOLS = [
+  ['warranty','設備保固','warranty-dashboard.html'],
+  ['incident','事件與 MTTR','incident-tracker.html'],
+  ['subnet','IP 子網規劃','subnet-planner.html'],
+  ['ports','Port 配線圖','port-map.html'],
+  ['change','變更排程','change-calendar.html'],
+];
+const nav = document.getElementById('nav'), frame = document.getElementById('frame');
+nav.innerHTML = TOOLS.map(([k,l])=>`<a href="#${k}" data-k="${k}">${l}</a>`).join('');
+function go(){
+  const k = (location.hash||'').slice(1);
+  const t = TOOLS.find(x=>x[0]===k) || TOOLS[0];
+  nav.querySelectorAll('a').forEach(a=>a.classList.toggle('on',a.dataset.k===t[0]));
+  if(!frame.src.endsWith(t[2])) frame.src = t[2];
+  document.title = t[1] + '｜IT 網路維運工具箱';
+}
+window.addEventListener('hashchange',go); go();
+
+// 資料庫連線狀態
+OPS.select('ops_devices','select=id&limit=1').then(r=>{
+  const el=document.getElementById('db');
+  el.className='db '+(r?'ok':'bad');
+  el.querySelector('span').textContent = r ? 'Supabase 已連線' : '離線（使用內建示範資料）';
+});
+</script>
+</body>
+</html>

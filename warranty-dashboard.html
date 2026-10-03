@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>設備保固儀表板</title>
+<style>
+:root{
+  --bg:#f6f7f9;--card:#fff;--text:#1d2330;--muted:#6b7385;--line:#e3e6ec;--accent:#2563eb;
+  --red:#d9362b;--red-bg:#fdecea;--amber:#b86e00;--amber-bg:#fff3de;--blue:#1d5fd1;--blue-bg:#e8f0fe;--green:#1f8a4c;--green-bg:#e6f6ec;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#12151c;--card:#1b2029;--text:#e8ebf2;--muted:#98a1b3;--line:#2b323f;--accent:#6b9bff;
+    --red:#ff7b72;--red-bg:#3a1d1b;--amber:#f0b45a;--amber-bg:#3a2d14;--blue:#7fa8ff;--blue-bg:#1c2a45;--green:#5fd08a;--green-bg:#17301f}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,"PingFang TC","Noto Sans TC",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 20px}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;cursor:pointer;text-align:left;font:inherit;color:inherit}
+.card .n{font-size:28px;font-weight:700;line-height:1.1}
+.card .l{color:var(--muted);font-size:13px}
+.card.active{outline:2px solid var(--accent)}
+.c-expired .n{color:var(--red)}.c-90 .n{color:var(--amber)}.c-365 .n{color:var(--blue)}.c-ok .n{color:var(--green)}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:16px}
+.panel h2{font-size:14px;margin:0 0 10px}
+.bars{display:flex;align-items:flex-end;gap:6px;height:90px}
+.bar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;min-width:0}
+.bar i{display:block;width:100%;background:var(--accent);border-radius:3px 3px 0 0;min-height:2px}
+.bar.past i{background:var(--red)}
+.bar b{font-size:11px;font-weight:600;margin-bottom:2px}
+.bar span{font-size:10px;color:var(--muted);margin-top:3px;white-space:nowrap}
+.tools{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+input,select,button.btn{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+input[type=search]{flex:1;min-width:180px}
+button.btn{cursor:pointer}
+button.btn:hover{border-color:var(--accent)}
+.tablewrap{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:760px}
+th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:12px;color:var(--muted);cursor:pointer;user-select:none;background:var(--card);position:sticky;top:0}
+th:hover{color:var(--text)}
+tr:last-child td{border-bottom:0}
+.badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:600}
+.b-expired{background:var(--red-bg);color:var(--red)}.b-90{background:var(--amber-bg);color:var(--amber)}
+.b-365{background:var(--blue-bg);color:var(--blue)}.b-ok{background:var(--green-bg);color:var(--green)}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+.foot{color:var(--muted);font-size:12px;margin-top:10px}
+@media(max-width:640px){.cards{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>設備保固儀表板</h1>
+  <p class="sub">示範資料 · 今天是 <span id="today"></span> · 狀態依保固到期日自動計算</p>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="panel">
+    <h2>未來 12 個月到期數量（紅色為已過期）</h2>
+    <div class="bars" id="bars"></div>
+  </div>
+
+  <div class="panel">
+    <h2>到期提醒摘要（可複製貼到 Teams / Line）</h2>
+    <div class="tools" style="margin-bottom:8px">
+      <select id="sumDays">
+        <option value="30">30 天內到期</option>
+        <option value="60">60 天內到期</option>
+        <option value="90">90 天內到期</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="sumExpired" checked> 包含已過期</label>
+      <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="sumVendor"> 依廠商分組</label>
+      <button class="btn" id="copyBtn">複製摘要</button>
+      <span id="copyMsg" class="foot" style="margin:0;align-self:center"></span>
+    </div>
+    <textarea id="sumText" readonly rows="8" style="width:100%;font:13px/1.6 ui-monospace,Menlo,monospace;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;resize:vertical"></textarea>
+  </div>
+
+  <div class="tools">
+    <input type="search" id="q" placeholder="搜尋設備名稱、型號、位置、廠商…">
+    <select id="fLoc"></select>
+    <select id="fVendor"></select>
+    <button class="btn" id="exportBtn">匯出 CSV</button>
+    <label class="btn" style="cursor:pointer">匯入 CSV<input type="file" id="importFile" accept=".csv" hidden></label>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr id="head"></tr></thead>
+      <tbody id="body"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>沒有符合條件的設備</div>
+  </div>
+  <p class="foot" id="foot"></p>
+</div>
+
+<script src="ops-db.js"></script>
+<script>
+const DAY = 86400000;
+const today = new Date(); today.setHours(0,0,0,0);
+const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; // 用本地日期，避免 UTC 換算造成差一天
+const addDays = n => iso(new Date(today.getTime() + n*DAY));
+document.getElementById('today').textContent = iso(today);
+
+// 示範資料：到期日以「距今天數」產生，確保各狀態都有資料
+const seed = [
+ ['CORE-SW-01','Cisco Catalyst 9500','總機房 A 櫃','Cisco',-45],
+ ['CORE-SW-02','Cisco Catalyst 9500','總機房 A 櫃','Cisco',-45],
+ ['FW-HQ-01','Fortinet FG-200F','總機房 B 櫃','Fortinet',28],
+ ['FW-HQ-02','Fortinet FG-200F','總機房 B 櫃','Fortinet',28],
+ ['DIST-SW-3F','Aruba 6300M','3F 機房','HPE Aruba',-120],
+ ['DIST-SW-5F','Aruba 6300M','5F 機房','HPE Aruba',61],
+ ['ACC-SW-3F-01','Aruba 2930F-48G','3F 機房','HPE Aruba',-300],
+ ['ACC-SW-3F-02','Aruba 2930F-48G','3F 機房','HPE Aruba',-300],
+ ['ACC-SW-4F-01','Aruba 2930F-48G','4F 機房','HPE Aruba',15],
+ ['ACC-SW-4F-02','Aruba 2930F-48G','4F 機房','HPE Aruba',15],
+ ['ACC-SW-5F-01','Aruba 2930F-24G','5F 機房','HPE Aruba',140],
+ ['ACC-SW-5F-02','Aruba 2930F-24G','5F 機房','HPE Aruba',140],
+ ['AP-3F-01','Ruckus R650','3F 辦公區','Ruckus',-10],
+ ['AP-3F-02','Ruckus R650','3F 辦公區','Ruckus',-10],
+ ['AP-3F-03','Ruckus R650','3F 辦公區','Ruckus',-10],
+ ['AP-4F-01','Ruckus R650','4F 辦公區','Ruckus',200],
+ ['AP-4F-02','Ruckus R650','4F 辦公區','Ruckus',200],
+ ['AP-5F-01','Ruckus R750','5F 辦公區','Ruckus',330],
+ ['AP-5F-02','Ruckus R750','5F 辦公區','Ruckus',330],
+ ['WLC-01','Ruckus SmartZone 100','總機房 A 櫃','Ruckus',75],
+ ['LB-01','F5 BIG-IP i2600','總機房 C 櫃','F5',-200],
+ ['LB-02','F5 BIG-IP i2600','總機房 C 櫃','F5',-200],
+ ['RTR-WAN-01','Cisco ISR 4331','總機房 A 櫃','Cisco',250],
+ ['RTR-WAN-02','Cisco ISR 4331','總機房 A 櫃','Cisco',250],
+ ['RTR-BR-TPE','Cisco ISR 1100','台北分公司','Cisco',90],
+ ['RTR-BR-KHH','Cisco ISR 1100','高雄分公司','Cisco',400],
+ ['SW-BR-TPE','Aruba 2930F-24G','台北分公司','HPE Aruba',500],
+ ['SW-BR-KHH','Aruba 2930F-24G','高雄分公司','HPE Aruba',-5],
+ ['UPS-DC-01','APC Smart-UPS SRT 6K','總機房 UPS 室','APC',45],
+ ['UPS-DC-02','APC Smart-UPS SRT 6K','總機房 UPS 室','APC',45],
+ ['NAS-01','Synology RS3621xs+','總機房 C 櫃','Synology',600],
+ ['CAM-SW-01','Hikvision PoE Switch','1F 大廳','Hikvision',365],
+ ['DNS-APP-01','Infoblox NIOS 1405','總機房 B 櫃','Infoblox',-60],
+];
+let rows = seed.map(([name,model,loc,vendor,off],i)=>({
+  name,model,loc,vendor,
+  bought: addDays(off-1095),   // 三年保固
+  expire: addDays(off)
+}));
+
+const STATUS = {
+  expired:{label:'已過期',cls:'b-expired',card:'c-expired'},
+  d90:{label:'90 天內',cls:'b-90',card:'c-90'},
+  d365:{label:'一年內',cls:'b-365',card:'c-365'},
+  ok:{label:'保固中',cls:'b-ok',card:'c-ok'},
+};
+const daysLeft = r => Math.round((new Date(r.expire+'T00:00:00') - today)/DAY);
+const statusOf = r => { const d=daysLeft(r); return d<0?'expired':d<=90?'d90':d<=365?'d365':'ok'; };
+
+const cols = [
+  ['name','設備名稱'],['model','型號'],['loc','位置'],['vendor','廠商'],
+  ['bought','購買日'],['expire','保固到期日'],['days','剩餘天數'],['status','狀態']
+];
+let state = {q:'',loc:'',vendor:'',status:'',sort:'expire',dir:1};
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function fillSelects(){
+  const opts = (key,label) => `<option value="">全部${label}</option>` +
+    [...new Set(rows.map(r=>r[key]))].sort().map(v=>`<option>${esc(v)}</option>`).join('');
+  $('fLoc').innerHTML = opts('loc','位置');
+  $('fVendor').innerHTML = opts('vendor','廠商');
+  $('fLoc').value = state.loc; $('fVendor').value = state.vendor;
+}
+
+function filtered(){
+  const q = state.q.trim().toLowerCase();
+  return rows.filter(r =>
+    (!q || [r.name,r.model,r.loc,r.vendor].some(v=>v.toLowerCase().includes(q))) &&
+    (!state.loc || r.loc===state.loc) &&
+    (!state.vendor || r.vendor===state.vendor)
+  );
+}
+
+function renderCards(list){
+  const count = {expired:0,d90:0,d365:0,ok:0};
+  list.forEach(r=>count[statusOf(r)]++);
+  $('cards').innerHTML = Object.entries(STATUS).map(([k,s])=>
+    `<button class="card ${s.card} ${state.status===k?'active':''}" data-s="${k}">
+       <div class="n">${count[k]}</div><div class="l">${s.label}</div></button>`).join('');
+}
+
+function renderBars(list){
+  const buckets = [];
+  const base = new Date(today.getFullYear(), today.getMonth(), 1);
+  let past = list.filter(r=>daysLeft(r)<0).length;
+  buckets.push({label:'已過期',n:past,past:true});
+  for(let i=0;i<12;i++){
+    const d = new Date(base.getFullYear(), base.getMonth()+i, 1);
+    const n = list.filter(r=>{ const e=new Date(r.expire+'T00:00:00');
+      return daysLeft(r)>=0 && e.getFullYear()===d.getFullYear() && e.getMonth()===d.getMonth(); }).length;
+    buckets.push({label:`${d.getMonth()+1}月`,n});
+  }
+  const max = Math.max(1,...buckets.map(b=>b.n));
+  $('bars').innerHTML = buckets.map(b=>
+    `<div class="bar ${b.past?'past':''}"><b>${b.n||''}</b><i style="height:${b.n/max*100}%;${b.n?'':'opacity:.25'}"></i><span>${b.label}</span></div>`).join('');
+}
+
+function renderTable(list){
+  const shown = list.filter(r=>!state.status || statusOf(r)===state.status);
+  const val = r => state.sort==='days'?daysLeft(r) : state.sort==='status'?daysLeft(r) : r[state.sort];
+  shown.sort((a,b)=>{ const x=val(a),y=val(b); return (x>y?1:x<y?-1:0)*state.dir; });
+  $('head').innerHTML = cols.map(([k,l])=>
+    `<th data-k="${k}">${l}${state.sort===k?(state.dir>0?' ▲':' ▼'):''}</th>`).join('');
+  $('body').innerHTML = shown.map(r=>{
+    const d=daysLeft(r), s=STATUS[statusOf(r)];
+    return `<tr><td><b>${esc(r.name)}</b></td><td>${esc(r.model)}</td><td>${esc(r.loc)}</td><td>${esc(r.vendor)}</td>
+      <td>${r.bought}</td><td>${r.expire}</td><td>${d<0?`逾期 ${-d} 天`:`${d} 天`}</td>
+      <td><span class="badge ${s.cls}">${s.label}</span></td></tr>`;
+  }).join('');
+  $('empty').hidden = shown.length>0;
+  $('foot').textContent = `顯示 ${shown.length} / ${rows.length} 台設備`;
+  return shown;
+}
+
+function render(){
+  const list = filtered();
+  renderCards(list); renderBars(list); window._shown = renderTable(list);
+}
+
+$('q').addEventListener('input',e=>{state.q=e.target.value;render()});
+$('fLoc').addEventListener('change',e=>{state.loc=e.target.value;render()});
+$('fVendor').addEventListener('change',e=>{state.vendor=e.target.value;render()});
+$('cards').addEventListener('click',e=>{
+  const c=e.target.closest('.card'); if(!c) return;
+  state.status = state.status===c.dataset.s ? '' : c.dataset.s; render();
+});
+$('head').addEventListener('click',e=>{
+  const k=e.target.closest('th')?.dataset.k; if(!k) return;
+  state.dir = state.sort===k ? -state.dir : 1; state.sort=k; render();
+});
+
+// CSV 匯出 / 匯入（欄位：name,model,loc,vendor,bought,expire）
+$('exportBtn').onclick = () => {
+  const head = ['設備名稱','型號','位置','廠商','購買日','保固到期日','狀態'];
+  const lines = [head].concat((window._shown||[]).map(r=>
+    [r.name,r.model,r.loc,r.vendor,r.bought,r.expire,STATUS[statusOf(r)].label]));
+  const csv = '﻿' + lines.map(l=>l.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = `warranty-${iso(today)}.csv`; a.click();
+};
+function parseCSV(t){
+  const out=[]; let row=[],cur='',q=false;
+  for(let i=0;i<t.length;i++){const c=t[i];
+    if(q){ if(c==='"'&&t[i+1]==='"'){cur+='"';i++} else if(c==='"') q=false; else cur+=c; }
+    else if(c==='"') q=true; else if(c===',') {row.push(cur);cur=''}
+    else if(c==='\n'||c==='\r'){ if(c==='\r'&&t[i+1]==='\n') i++; row.push(cur);cur=''; if(row.some(x=>x.trim()))out.push(row); row=[]; }
+    else cur+=c; }
+  if(cur||row.length){row.push(cur);out.push(row)} return out;
+}
+$('importFile').addEventListener('change',async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const data = parseCSV((await f.text()).replace(/^﻿/,'')).slice(1);
+  const ok = data.filter(r=>r.length>=6 && /^\d{4}-\d{2}-\d{2}$/.test(r[5].trim()));
+  if(!ok.length){ alert('匯入失敗：欄位需為 設備名稱, 型號, 位置, 廠商, 購買日, 保固到期日（日期格式 YYYY-MM-DD）'); return; }
+  rows = ok.map(r=>({name:r[0].trim(),model:r[1].trim(),loc:r[2].trim(),vendor:r[3].trim(),bought:r[4].trim(),expire:r[5].trim()}));
+  state.loc=state.vendor=state.status=''; fillSelects(); render(); e.target.value='';
+});
+
+// 到期提醒摘要：不受下方篩選影響，永遠以全部設備計算
+function buildSummary(){
+  const n = +$('sumDays').value, withExpired = $('sumExpired').checked;
+  const fmt = r => { const d=daysLeft(r);
+    return `・${r.name}（${r.model}／${r.loc}）${r.expire} ${d<0?`已逾期 ${-d} 天`:d===0?'今天到期':`剩 ${d} 天`}`; };
+  const byDays = (a,b)=>daysLeft(a)-daysLeft(b);
+  const soon = rows.filter(r=>{const d=daysLeft(r);return d>=0&&d<=n}).sort(byDays);
+  const exp = rows.filter(r=>daysLeft(r)<0).sort(byDays);
+  let t = `【設備保固提醒】${iso(today)}\n`;
+  if($('sumVendor').checked){
+    const items = soon.concat(withExpired?exp:[]);
+    const vendors = [...new Set(items.map(r=>r.vendor))].sort();
+    t += `\n共 ${items.length} 台需處理（${n} 天內到期${withExpired?'＋已過期':''}），依廠商分組：\n`;
+    vendors.forEach(v=>{
+      const g = items.filter(r=>r.vendor===v);
+      t += `\n■ ${v}（${g.length} 台）\n` + g.map(fmt).join('\n') + '\n';
+    });
+    if(!vendors.length) t += '\n（無）\n';
+  } else {
+    t += `\n⚠️ ${n} 天內到期：${soon.length} 台\n` + (soon.length?soon.map(fmt).join('\n'):'（無）') + '\n';
+    if(withExpired) t += `\n❌ 已過期：${exp.length} 台\n` + (exp.length?exp.map(fmt).join('\n'):'（無）') + '\n';
+  }
+  t += `\n請盡早確認是否續約或汰換。`;
+  $('sumText').value = t;
+}
+['sumDays','sumExpired','sumVendor'].forEach(id=>$(id).addEventListener('change',buildSummary));
+$('copyBtn').onclick = async () => {
+  try { await navigator.clipboard.writeText($('sumText').value); }
+  catch { $('sumText').select(); document.execCommand('copy'); }
+  $('copyMsg').textContent = '已複製 ✓'; setTimeout(()=>$('copyMsg').textContent='',2000);
+};
+// 匯入資料後也要更新摘要
+const _render = render; render = function(){ _render(); buildSummary(); };
+
+fillSelects(); render();
+
+// 從 Supabase 載入設備資料；失敗就沿用上面的內建示範資料
+(async () => {
+  const r = await OPS.select('ops_devices', 'order=expire.asc');
+  if (r) {
+    rows = r.map(d => ({name:d.name, model:d.model, loc:d.location, vendor:d.vendor, bought:d.bought, expire:d.expire}));
+    fillSelects(); render();
+  }
+  OPS.mark();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>變更排程與衝突檢查</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1d2330;--muted:#6b7385;--line:#e3e6ec;--accent:#2563eb;
+ --red:#d9362b;--red-bg:#fdecea;--amber:#b86e00;--amber-bg:#fff3de;--green:#1f8a4c;--green-bg:#e6f6ec;--freeze:#e9e4fb;--freeze-t:#5b3fc4}
+@media (prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1b2029;--text:#e8ebf2;--muted:#98a1b3;--line:#2b323f;--accent:#6b9bff;
+ --red:#ff7b72;--red-bg:#3a1d1b;--amber:#f0b45a;--amber-bg:#3a2d14;--green:#5fd08a;--green-bg:#17301f;--freeze:#2a2547;--freeze-t:#b69bff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,"PingFang TC","Noto Sans TC",system-ui,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 20px}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.card,.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.panel{margin-bottom:16px}
+.card .n{font-size:28px;font-weight:700;line-height:1.1}.card .l{color:var(--muted);font-size:13px}
+.panel h2{font-size:15px;margin:0 0 10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+input,select,button{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+button{cursor:pointer}button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}
+.form label{display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:3px}
+.form input,.form select{width:100%}
+.live{margin-top:10px;padding:8px 12px;border-radius:8px;font-size:13px}
+.live.ok{background:var(--green-bg);color:var(--green)}.live.bad{background:var(--red-bg);color:var(--red)}.live.warn{background:var(--amber-bg);color:var(--amber)}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.dow{font-size:12px;color:var(--muted);text-align:center;padding:4px 0}
+.day{min-height:92px;background:var(--bg);border-radius:6px;padding:4px;overflow:hidden;position:relative}
+.day.other{opacity:.4}.day.today{outline:2px solid var(--accent)}
+.day.freeze{background:var(--freeze)}
+.day .d{font-size:12px;color:var(--muted)}
+.day .fz{font-size:10px;color:var(--freeze-t);font-weight:600}
+.chip{display:block;font-size:11px;line-height:1.3;border-radius:4px;padding:1px 5px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--green-bg);color:var(--green);cursor:pointer}
+.chip.conflict{background:var(--red-bg);color:var(--red);font-weight:600}
+.chip.warn{background:var(--amber-bg);color:var(--amber)}
+.tw{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:860px}
+th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--muted)}tr:last-child td{border-bottom:0}
+.tag{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:600;margin:1px 2px 1px 0}
+.t-ok{background:var(--green-bg);color:var(--green)}.t-bad{background:var(--red-bg);color:var(--red)}.t-warn{background:var(--amber-bg);color:var(--amber)}
+.x{border:0;background:none;color:var(--muted);padding:2px 8px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+tr.hl{background:var(--amber-bg)}
+@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}.day{min-height:64px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>變更排程與衝突檢查</h1>
+  <p class="sub">示範資料 · 月曆檢視變更單；自動標出「同設備時段重疊」、「落入業務凍結期」與「同時段有其他變更」</p>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="panel">
+    <h2>新增變更單（即時檢查）</h2>
+    <form class="form" id="form">
+      <label>標題<input name="title" required placeholder="例如 核心交換器韌體升級"></label>
+      <label>開始時間<input type="datetime-local" name="start" required></label>
+      <label>結束時間<input type="datetime-local" name="end" required></label>
+      <label>影響設備（逗號分隔）<input name="devices" required placeholder="CORE-01, CORE-02"></label>
+      <label>風險等級<select name="risk"><option>低</option><option selected>中</option><option>高</option></select></label>
+      <label>負責人<input name="owner" required placeholder="姓名"></label>
+      <label style="justify-content:flex-end"><button class="primary" type="submit">加入排程</button></label>
+    </form>
+    <div class="live ok" id="live">填寫時間與設備後，會即時顯示是否有衝突</div>
+  </div>
+
+  <div class="panel">
+    <h2><span id="monthTitle"></span><span class="row"><button id="prev">‹ 上月</button><button id="todayBtn">今天</button><button id="next">下月 ›</button></span></h2>
+    <div class="cal" id="cal"></div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">
+      <span class="chip" style="display:inline-block">正常</span>
+      <span class="chip warn" style="display:inline-block">同時段有其他變更</span>
+      <span class="chip conflict" style="display:inline-block">衝突</span>
+      <span style="display:inline-block;background:var(--freeze);color:var(--freeze-t);border-radius:4px;padding:1px 6px;font-size:11px">業務凍結期</span>
+    </div>
+  </div>
+
+  <div class="panel"><h2>業務凍結時段</h2><div id="freezeList" style="font-size:13px"></div>
+    <form class="row" id="fzForm" style="margin-top:10px;align-items:center">
+      <input name="name" placeholder="名稱，例如 年度盤點" required style="min-width:160px">
+      <input type="date" name="start" required> <span>～</span> <input type="date" name="end" required>
+      <button type="submit">＋ 新增凍結期</button>
+    </form>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>時間</th><th>標題</th><th>影響設備</th><th>風險</th><th>負責人</th><th>檢查結果</th><th></th></tr></thead>
+    <tbody id="body"></tbody></table></div>
+</div>
+
+<script src="ops-db.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pad=n=>String(n).padStart(2,'0');
+const ymd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const loc=d=>`${ymd(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const now=new Date(); const day0=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+const at=(off,h,m=0)=>{const d=new Date(day0.getTime()+off*864e5);d.setHours(h,m,0,0);return loc(d)};
+
+// 示範資料（日期相對今天）
+function demo(){return [
+ {id:1,title:'核心交換器韌體升級',start:at(3,22),end:at(4,2),devices:'CORE-01, CORE-02',risk:'高',owner:'小陳'},
+ {id:2,title:'核心交換器 VLAN 調整',start:at(3,23),end:at(4,1),devices:'CORE-01',risk:'中',owner:'小林'},
+ {id:3,title:'防火牆規則更新',start:at(5,20),end:at(5,22),devices:'FW-HQ-01',risk:'中',owner:'阿豪'},
+ {id:4,title:'3F 交換器更換',start:at(6,19),end:at(6,23),devices:'SW-3F-01',risk:'中',owner:'小美'},
+ {id:5,title:'年度結帳期間 ERP 網段調整',start:at(10,20),end:at(10,23),devices:'CORE-01',risk:'高',owner:'小陳'},
+ {id:6,title:'AP 韌體批次更新',start:at(12,12),end:at(12,14),devices:'WLC-01, AP-3F-01, AP-4F-01',risk:'低',owner:'小林'},
+ {id:7,title:'WAN 路由器更換',start:at(12,13),end:at(12,16),devices:'RTR-WAN-01',risk:'高',owner:'阿豪'},
+ {id:8,title:'UPS 電池更換',start:at(17,9),end:at(17,12),devices:'UPS-DC-01',risk:'中',owner:'小美'},
+ {id:9,title:'DNS 設備汰換',start:at(-2,21),end:at(-2,23),devices:'DNS-APP-01',risk:'中',owner:'小陳'},
+];}
+function demoFreeze(){
+  const s=new Date(day0.getTime()+9*864e5), e=new Date(day0.getTime()+11*864e5);
+  return [{name:'年度結帳',start:ymd(s),end:ymd(e)},{name:'雙十一檔期',start:ymd(new Date(day0.getTime()+30*864e5)),end:ymd(new Date(day0.getTime()+33*864e5))}];
+}
+let changes=demo(), freezes=demoFreeze(), nextId=100, view=new Date(now.getFullYear(),now.getMonth(),1);
+
+const devs=c=>c.devices.split(/[,，]/).map(s=>s.trim().toUpperCase()).filter(Boolean);
+const overlap=(a,b)=>a.start<b.end&&b.start<a.end;
+const inFreeze=c=>freezes.filter(f=>c.start.slice(0,10)<=f.end&&c.end.slice(0,10)>=f.start);
+// 檢查單一變更對其他變更的狀況
+function check(c,others){
+  const dev=[],time=[];
+  others.forEach(o=>{
+    if(o===c||!overlap(c,o)) return;
+    const shared=devs(c).filter(d=>devs(o).includes(d));
+    if(shared.length) dev.push({o,shared}); else time.push(o);
+  });
+  return {dev,time,freeze:inFreeze(c)};
+}
+const level=r=>(r.dev.length||r.freeze.length)?'bad':r.time.length?'warn':'ok';
+const label=c=>`${c.start.slice(5,10).replace('-','/')} ${c.start.slice(11)}–${c.end.slice(0,10)===c.start.slice(0,10)?c.end.slice(11):c.end.slice(5,10).replace('-','/')+' '+c.end.slice(11)}`;
+
+function render(){
+  const sorted=changes.slice().sort((a,b)=>a.start<b.start?-1:1);
+  const res=new Map(sorted.map(c=>[c,check(c,changes)]));
+  const upcoming=sorted.filter(c=>c.end>=loc(now));
+  const bad=upcoming.filter(c=>level(res.get(c))==='bad').length;
+  const warn=upcoming.filter(c=>level(res.get(c))==='warn').length;
+  const high=upcoming.filter(c=>c.risk==='高').length;
+  $('cards').innerHTML=[['待執行變更',upcoming.length,''],['有衝突',bad,'color:var(--red)'],['同時段需留意',warn,'color:var(--amber)'],['高風險變更',high,'']]
+    .map(([l,n,s])=>`<div class="card"><div class="n" style="${s}">${n}</div><div class="l">${l}</div></div>`).join('');
+
+  // 月曆
+  $('monthTitle').textContent=`${view.getFullYear()} 年 ${view.getMonth()+1} 月`;
+  const first=new Date(view.getFullYear(),view.getMonth(),1), startDay=new Date(first.getTime()-first.getDay()*864e5);
+  let h=['日','一','二','三','四','五','六'].map(d=>`<div class="dow">${d}</div>`).join('');
+  for(let i=0;i<42;i++){
+    const d=new Date(startDay.getTime()+i*864e5), key=ymd(d);
+    const fz=freezes.find(f=>key>=f.start&&key<=f.end);
+    const items=sorted.filter(c=>c.start.slice(0,10)<=key&&c.end.slice(0,10)>=key);
+    h+=`<div class="day ${d.getMonth()!==view.getMonth()?'other':''} ${key===ymd(day0)?'today':''} ${fz?'freeze':''}">
+      <div class="d">${d.getDate()}${fz?` <span class="fz">凍結·${esc(fz.name)}</span>`:''}</div>
+      ${items.slice(0,3).map(c=>{const l=level(res.get(c));return `<span class="chip ${l==='bad'?'conflict':l==='warn'?'warn':''}" data-id="${c.id}" title="${esc(c.title)}">${c.start.slice(0,10)===key?c.start.slice(11,16)+' ':''}${esc(c.title)}</span>`}).join('')}
+      ${items.length>3?`<span class="d">+${items.length-3} 筆</span>`:''}</div>`;
+  }
+  $('cal').innerHTML=h;
+
+  $('freezeList').innerHTML=freezes.map((f,i)=>`<span class="tag t-warn" style="background:var(--freeze);color:var(--freeze-t)">${esc(f.name)}　${f.start} ～ ${f.end}<button class="x" data-fz="${i}">✕</button></span>`).join('')||'（無）';
+
+  $('body').innerHTML=sorted.map(c=>{
+    const r=res.get(c), tags=[];
+    r.dev.forEach(x=>tags.push(`<span class="tag t-bad">與「${esc(x.o.title)}」共用 ${x.shared.join('/')} 且時間重疊</span>`));
+    r.freeze.forEach(f=>tags.push(`<span class="tag t-bad">落入凍結期：${esc(f.name)}</span>`));
+    r.time.forEach(o=>tags.push(`<span class="tag t-warn">同時段：${esc(o.title)}</span>`));
+    if(c.risk==='高'&&!tags.length) tags.push('<span class="tag t-warn">高風險，請確認回復計畫</span>');
+    return `<tr id="r${c.id}"><td>${label(c)}</td><td><b>${esc(c.title)}</b></td><td>${esc(c.devices)}</td><td>${c.risk}</td><td>${esc(c.owner)}</td>
+      <td>${tags.join('')||'<span class="tag t-ok">OK</span>'}</td><td><button class="x" data-del="${c.id}">✕</button></td></tr>`}).join('');
+}
+
+// 表單即時檢查
+function formChange(){
+  const f=Object.fromEntries(new FormData($('form')));
+  const live=$('live');
+  if(!f.start||!f.end||!f.devices){live.className='live ok';live.textContent='填寫時間與設備後，會即時顯示是否有衝突';return null}
+  if(f.end<=f.start){live.className='live bad';live.textContent='結束時間必須晚於開始時間';return null}
+  const c={id:-1,title:f.title,start:f.start,end:f.end,devices:f.devices,risk:f.risk,owner:f.owner};
+  const r=check(c,changes), msgs=[];
+  r.dev.forEach(x=>msgs.push(`與「${x.o.title}」共用 ${x.shared.join('/')}，時間重疊`));
+  r.freeze.forEach(z=>msgs.push(`落入凍結期「${z.name}」`));
+  r.time.forEach(o=>msgs.push(`同時段另有「${o.title}」（不同設備）`));
+  const l=level(r);
+  live.className='live '+(l==='bad'?'bad':l==='warn'?'warn':'ok');
+  live.innerHTML=l==='ok'?'✓ 沒有衝突':(l==='bad'?'✕ 衝突：':'⚠ 留意：')+msgs.map(esc).join('；');
+  return c;
+}
+$('form').addEventListener('input',formChange);
+$('form').addEventListener('submit',async e=>{
+  e.preventDefault(); const c=formChange(); if(!c) return;
+  const r=check(c,changes);
+  if(level(r)==='bad' && !confirm('此變更有衝突，仍要加入排程嗎？')) return;
+  if(OPS.live){
+    const row=await OPS.insert('ops_changes',{title:c.title,start_at:c.start,end_at:c.end,devices:c.devices,risk:c.risk,owner:c.owner});
+    if(!row) return OPS.fail('新增失敗');
+    c.id=row.id;
+  } else c.id=nextId++;
+  changes.push(c); e.target.reset(); formChange(); render();
+});
+$('body').addEventListener('click',async e=>{
+  const d=e.target.dataset.del; if(!d) return;
+  if(OPS.live&&!(await OPS.remove('ops_changes','id=eq.'+d))) return OPS.fail('刪除失敗');
+  changes=changes.filter(c=>c.id!==+d); render();
+});
+$('fzForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const f=Object.fromEntries(new FormData(e.target));
+  if(f.end<f.start) return alert('結束日不能早於開始日');
+  const z={name:f.name.trim(),start:f.start,end:f.end};
+  if(OPS.live){
+    const row=await OPS.insert('ops_freezes',{name:z.name,start_date:z.start,end_date:z.end});
+    if(!row) return OPS.fail('新增失敗');
+    z.id=row.id;
+  }
+  freezes.push(z); freezes.sort((a,b)=>a.start<b.start?-1:1);
+  e.target.reset(); formChange(); render();
+});
+$('freezeList').addEventListener('click',async e=>{
+  const i=e.target.dataset.fz; if(i===undefined) return;
+  const f=freezes[+i];
+  if(OPS.live&&f.id&&!(await OPS.remove('ops_freezes','id=eq.'+f.id))) return OPS.fail('刪除失敗');
+  freezes.splice(+i,1); render();
+});
+$('cal').addEventListener('click',e=>{const id=e.target.dataset.id; if(!id) return;
+  document.querySelectorAll('tr.hl').forEach(t=>t.classList.remove('hl'));
+  const r=$('r'+id); r.classList.add('hl'); r.scrollIntoView({behavior:'smooth',block:'center'});});
+$('prev').onclick=()=>{view=new Date(view.getFullYear(),view.getMonth()-1,1);render()};
+$('next').onclick=()=>{view=new Date(view.getFullYear(),view.getMonth()+1,1);render()};
+$('todayBtn').onclick=()=>{view=new Date(now.getFullYear(),now.getMonth(),1);render()};
+render();
+
+// 從 Supabase 載入；失敗就沿用內建示範資料
+(async()=>{
+  const [c,f]=await Promise.all([OPS.select('ops_changes','order=start_at.asc'),OPS.select('ops_freezes','order=start_date.asc')]);
+  if(c&&f){
+    changes=c.map(x=>({id:x.id,title:x.title,start:x.start_at.slice(0,16),end:x.end_at.slice(0,16),devices:x.devices,risk:x.risk,owner:x.owner}));
+    freezes=f.map(x=>({id:x.id,name:x.name,start:x.start_date,end:x.end_date}));
+    render(); formChange();
+  }
+  OPS.mark();
+})();
+</script>
+</body>
+</html>

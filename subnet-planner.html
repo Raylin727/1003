@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IP 子網計算與規劃器</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1d2330;--muted:#6b7385;--line:#e3e6ec;--accent:#2563eb;--red:#d9362b;--red-bg:#fdecea;--green:#1f8a4c;--green-bg:#e6f6ec}
+@media (prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1b2029;--text:#e8ebf2;--muted:#98a1b3;--line:#2b323f;--accent:#6b9bff;--red:#ff7b72;--red-bg:#3a1d1b;--green:#5fd08a;--green-bg:#17301f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,"PingFang TC","Noto Sans TC",system-ui,sans-serif}
+.wrap{max-width:1000px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 20px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:16px}
+.panel h2{font-size:15px;margin:0 0 10px}
+input,select,button{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+button{cursor:pointer}button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.mono{font-family:ui-monospace,Menlo,monospace}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px}
+.kv{background:var(--bg);border-radius:8px;padding:8px 12px}
+.kv small{display:block;color:var(--muted);font-size:12px}
+.kv b{font-size:15px}
+.err{color:var(--red);margin-top:8px}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:640px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:12px;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+td input{width:100%;min-width:90px;padding:4px 8px}
+.bad{background:var(--red-bg)}
+.tag{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:600}
+.t-ok{background:var(--green-bg);color:var(--green)}.t-bad{background:var(--red-bg);color:var(--red)}
+.bin{word-break:break-all;line-height:1.8}
+.bin .n{color:var(--accent);font-weight:700}
+.x{border:0;background:none;color:var(--muted);padding:2px 8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>IP 子網計算與規劃器</h1>
+  <p class="sub">IPv4 · 計算網段資訊、切割子網、檢查 VLAN 規劃表是否重疊（資料皆為示範）</p>
+
+  <div class="panel">
+    <h2>① 網段計算</h2>
+    <div class="row">
+      <input id="cidr" class="mono" value="10.20.0.0/16" size="22" placeholder="例如 192.168.1.0/24">
+      <button class="primary" id="calcBtn">計算</button>
+      <span style="color:var(--muted)">也可輸入 192.168.1.10/255.255.255.0</span>
+    </div>
+    <div class="err" id="err"></div>
+    <div class="grid" id="info"></div>
+    <div class="bin mono" id="bin" style="margin-top:12px"></div>
+  </div>
+
+  <div class="panel">
+    <h2>② 子網切割</h2>
+    <div class="row">
+      <span>將上方網段切成</span>
+      <select id="newLen"></select>
+      <button id="splitBtn">切割</button>
+      <span id="splitNote" style="color:var(--muted)"></span>
+    </div>
+    <div class="tw" style="margin-top:10px"><table id="splitTbl" hidden>
+      <thead><tr><th>#</th><th>網段</th><th>可用 IP 範圍</th><th>廣播位址</th><th>可用主機</th><th></th></tr></thead>
+      <tbody id="splitBody"></tbody></table></div>
+  </div>
+
+  <div class="panel">
+    <h2>③ VLAN 規劃表與重疊檢查</h2>
+    <div class="tw"><table>
+      <thead><tr><th>VLAN ID</th><th>名稱</th><th>網段 (CIDR)</th><th>用途</th><th>可用主機</th><th>檢查</th><th></th></tr></thead>
+      <tbody id="vlanBody"></tbody></table></div>
+    <div class="row" style="margin-top:10px">
+      <button id="addVlan">＋ 新增一列</button>
+      <button id="resetVlan">還原示範資料</button>
+      <span id="vlanSummary" style="color:var(--muted)"></span>
+    </div>
+  </div>
+</div>
+
+<script src="ops-db.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const toInt = s => { const p=s.trim().split('.'); if(p.length!==4||p.some(x=>!/^\d{1,3}$/.test(x)||+x>255)) return null;
+  return ((+p[0]<<24)|(+p[1]<<16)|(+p[2]<<8)|+p[3])>>>0; };
+const toIp = n => [n>>>24,(n>>>16)&255,(n>>>8)&255,n&255].join('.');
+const maskOf = l => l===0?0:(0xFFFFFFFF<<(32-l))>>>0;
+const lenOfMask = m => { const b=m.toString(2).padStart(32,'0'); return /^1*0*$/.test(b)?b.indexOf('0')<0?32:b.indexOf('0'):null; };
+
+function parse(str){
+  const [a,b] = str.trim().split('/');
+  const ip = toInt(a||''); if(ip===null) return null;
+  let len;
+  if(b===undefined) return null;
+  if(/^\d{1,2}$/.test(b)){ len=+b; if(len>32) return null; }
+  else { const m=toInt(b); if(m===null) return null; len=lenOfMask(m); if(len===null) return null; }
+  const mask=maskOf(len), net=(ip&mask)>>>0, bc=(net|(~mask>>>0))>>>0;
+  const total=2**(32-len);
+  const hosts = len>=31 ? (len===32?1:2) : total-2;
+  const first = len>=31?net:net+1, last = len>=31?bc:bc-1;
+  return {ip,len,mask,net,bc,total,hosts,first,last};
+}
+const fmt = n => n.toLocaleString('en-US');
+
+let cur = null;
+function calc(){
+  const r = parse($('cidr').value);
+  $('err').textContent = r?'':'格式錯誤，請輸入像 10.20.0.0/16 的 CIDR 表示法';
+  if(!r){ $('info').innerHTML=''; $('bin').innerHTML=''; return; }
+  cur = r;
+  const kv = (k,v)=>`<div class="kv"><small>${k}</small><b class="mono">${v}</b></div>`;
+  $('info').innerHTML =
+    kv('網路位址',toIp(r.net)+'/'+r.len)+kv('子網遮罩',toIp(r.mask))+kv('反向遮罩 (Wildcard)',toIp(~r.mask>>>0))+
+    kv('廣播位址',toIp(r.bc))+kv('第一個可用 IP',toIp(r.first))+kv('最後一個可用 IP',toIp(r.last))+
+    kv('可用主機數',fmt(r.hosts))+kv('位址總數',fmt(r.total))+
+    kv('輸入的 IP 屬於',(r.ip!==r.net?'⚠ 不是網路位址（已換算）':'網路位址'));
+  const bits = n=>n.toString(2).padStart(32,'0').replace(/(\d{8})(?=\d)/g,'$1.');
+  const b = bits(r.net); // 網路位元以強調色標示
+  let out='',cnt=0;
+  for(const ch of b){ if(ch==='.'){out+='.';continue;} out += cnt<r.len?`<span class="n">${ch}</span>`:ch; cnt++; }
+  $('bin').innerHTML = `網路位元（藍色 ${r.len} 位）：${out}`;
+  const sel = $('newLen'); sel.innerHTML='';
+  for(let l=r.len+1;l<=Math.min(r.len+8,30);l++) sel.add(new Option(`/${l}（${fmt(2**(32-l)-2)} 台主機）`,l));
+  $('splitTbl').hidden = true; $('splitNote').textContent='';
+}
+
+function split(){
+  if(!cur) return;
+  const l=+$('newLen').value, step=2**(32-l), count=2**(l-cur.len), show=Math.min(count,256);
+  let h='';
+  for(let i=0;i<show;i++){
+    const net=(cur.net+i*step)>>>0, bc=net+step-1;
+    h+=`<tr><td>${i+1}</td><td class="mono">${toIp(net)}/${l}</td><td class="mono">${toIp(net+1)} – ${toIp(bc-1)}</td>
+      <td class="mono">${toIp(bc)}</td><td>${fmt(step-2)}</td>
+      <td><button class="x" data-cidr="${toIp(net)}/${l}" title="加入 VLAN 規劃表">＋規劃</button></td></tr>`;
+  }
+  $('splitBody').innerHTML=h; $('splitTbl').hidden=false;
+  $('splitNote').textContent = `共 ${fmt(count)} 個子網` + (count>show?`（僅顯示前 ${show} 個）`:'');
+}
+
+// VLAN 規劃表
+const demoVlans = [
+  [10,'MGMT','10.20.10.0/24','網路設備管理'],
+  [20,'SERVER','10.20.20.0/24','伺服器區'],
+  [30,'OFFICE-3F','10.20.30.0/24','3F 辦公室'],
+  [40,'OFFICE-4F','10.20.40.0/24','4F 辦公室'],
+  [50,'WIFI-STAFF','10.20.50.0/23','員工無線網路'],
+  [51,'WIFI-GUEST','10.20.51.0/24','訪客無線網路（與 50 重疊，示範錯誤）'],
+  [60,'VOICE','10.20.60.0/24','IP 電話'],
+  [70,'CCTV','10.20.70.0/25','監視攝影機'],
+  [80,'DMZ','172.16.80.0/28','對外服務'],
+  [20,'LAB','10.20.90.0/24','測試環境（VLAN ID 重複，示範錯誤）'],
+];
+let vlans = demoVlans.map(v=>({id:v[0],name:v[1],cidr:v[2],use:v[3]}));
+
+function renderVlans(){
+  const ps = vlans.map(v=>parse(v.cidr));
+  const issues = vlans.map(()=>[]);
+  vlans.forEach((v,i)=>{
+    if(!ps[i]) { issues[i].push('CIDR 格式錯誤'); return; }
+    if(ps[i].ip!==ps[i].net) issues[i].push(`建議寫成 ${toIp(ps[i].net)}/${ps[i].len}`);
+    vlans.forEach((w,j)=>{
+      if(j<=i) return;
+      if(ps[j] && ps[i].net<=ps[j].bc && ps[j].net<=ps[i].bc){
+        issues[i].push(`與 VLAN ${w.id} 網段重疊`); issues[j].push(`與 VLAN ${v.id} 網段重疊`); }
+      if(String(v.id)===String(w.id) && v.id!==''){
+        issues[i].push(`VLAN ID 與第 ${j+1} 列重複`); issues[j].push(`VLAN ID 與第 ${i+1} 列重複`); }
+    });
+  });
+  $('vlanBody').innerHTML = vlans.map((v,i)=>{
+    const bad = issues[i].some(t=>!t.startsWith('建議'));
+    const tag = issues[i].length ? issues[i].map(t=>`<span class="tag ${t.startsWith('建議')?'':'t-bad'}" style="${t.startsWith('建議')?'background:var(--bg)':''}">${esc(t)}</span>`).join(' ') : '<span class="tag t-ok">OK</span>';
+    return `<tr class="${bad?'bad':''}">
+      <td><input data-i="${i}" data-k="id" value="${esc(v.id)}" style="min-width:60px;width:70px"></td>
+      <td><input data-i="${i}" data-k="name" value="${esc(v.name)}"></td>
+      <td><input data-i="${i}" data-k="cidr" class="mono" value="${esc(v.cidr)}"></td>
+      <td><input data-i="${i}" data-k="use" value="${esc(v.use)}" style="min-width:160px"></td>
+      <td>${ps[i]?fmt(ps[i].hosts):'-'}</td><td>${tag}</td>
+      <td><button class="x" data-del="${i}" title="刪除">✕</button></td></tr>`;
+  }).join('');
+  const nBad = issues.filter(a=>a.some(t=>!t.startsWith('建議'))).length;
+  $('vlanSummary').textContent = `共 ${vlans.length} 筆，${nBad} 筆有問題`;
+}
+// 輸入時不重繪整張表（避免失焦），改在 change 時更新
+// 資料庫對應：id=VLAN ID 欄位，pk=資料庫主鍵
+const TBL='ops_vlans', COL={id:'vlan_id',name:'name',cidr:'cidr',use:'purpose'};
+const dbRow=(v,i)=>({vlan_id:String(v.id),name:v.name,cidr:v.cidr,purpose:v.use,sort_order:i});
+async function loadVlans(){
+  const r=await OPS.select(TBL,'order=sort_order.asc,id.asc');
+  if(r) vlans=r.map(x=>({pk:x.id,id:x.vlan_id,name:x.name,cidr:x.cidr,use:x.purpose}));
+  OPS.mark();
+}
+async function pushVlan(v){          // 新增一列（有連線時同步寫入資料庫）
+  if(OPS.live){
+    const row=await OPS.insert(TBL,dbRow(v,vlans.length));
+    if(!row) return OPS.fail('新增失敗');
+    v.pk=row.id;
+  }
+  vlans.push(v); renderVlans();
+}
+$('vlanBody').addEventListener('change',async e=>{
+  const t=e.target; if(t.dataset.i===undefined) return;
+  const v=vlans[+t.dataset.i]; v[t.dataset.k]=t.value;
+  if(OPS.live&&v.pk&&!(await OPS.patch(TBL,v.pk,{[COL[t.dataset.k]]:t.value}))) OPS.fail('儲存失敗');
+  renderVlans();
+});
+$('vlanBody').addEventListener('click',async e=>{
+  const d=e.target.dataset.del; if(d===undefined) return;
+  const v=vlans[+d];
+  if(OPS.live&&v.pk&&!(await OPS.remove(TBL,'id=eq.'+v.pk))) return OPS.fail('刪除失敗');
+  vlans.splice(+d,1); renderVlans();
+});
+$('splitBody').addEventListener('click',async e=>{
+  const c=e.target.dataset.cidr; if(!c) return;
+  await pushVlan({id:'',name:'NEW',cidr:c,use:''});
+  $('vlanBody').lastElementChild.scrollIntoView({behavior:'smooth',block:'center'});
+});
+$('addVlan').onclick=()=>pushVlan({id:'',name:'',cidr:'',use:''});
+$('resetVlan').onclick=async()=>{
+  const fresh=demoVlans.map(v=>({id:v[0],name:v[1],cidr:v[2],use:v[3]}));
+  if(OPS.live){
+    if(!(await OPS.remove(TBL,'id=gt.0'))) return OPS.fail('還原失敗');
+    for(const [i,v] of fresh.entries()){ const row=await OPS.insert(TBL,dbRow(v,i)); if(row) v.pk=row.id; }
+  }
+  vlans=fresh; renderVlans();
+};
+$('calcBtn').onclick=calc; $('splitBtn').onclick=split;
+$('cidr').addEventListener('keydown',e=>{if(e.key==='Enter')calc()});
+
+calc(); renderVlans();
+loadVlans().then(renderVlans);
+</script>
+</body>
+</html>
