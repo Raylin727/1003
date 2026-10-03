@@ -36,6 +36,16 @@
         return true;
       } catch (e) { console.warn('[ops-db] patch 失敗：', table, e); return false; }
     },
+    // 依任意條件修改，例：patchWhere('ops_ports','switch_id=eq.CORE-01&port_no=eq.3',{status:'down'})
+    async patchWhere(table, filter, obj) {
+      try {
+        const r = await fetch(`${URL_}/rest/v1/${table}?${filter}`, {
+          method: 'PATCH', headers: H, body: JSON.stringify(obj)
+        });
+        if (!r.ok) throw new Error(r.status + ' ' + (await r.text()));
+        return true;
+      } catch (e) { console.warn('[ops-db] patchWhere 失敗：', table, e); return false; }
+    },
     // filter 例：'id=eq.5' 或 'id=gt.0'（刪全部）
     async remove(table, filter) {
       try {

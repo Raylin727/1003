@@ -26,6 +26,9 @@ input[type=search]{flex:1;min-width:220px}
 .p{width:40px;height:40px;border-radius:5px;border:2px solid transparent;color:#fff;font-size:12px;font-weight:600;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center}
 .p.up{background:var(--up)}.p.down{background:var(--down)}.p.free{background:var(--free);color:var(--text)}.p.dis{background:var(--dis)}
 .p.dim{opacity:.22}
+@keyframes flash{0%{box-shadow:0 0 0 0 var(--hit)}40%{box-shadow:0 0 0 7px var(--hit)}100%{box-shadow:0 0 0 0 transparent}}
+.p.flash{animation:flash .9s ease-out}
+.live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--up);margin-right:5px}
 .p.hit{border-color:var(--hit);box-shadow:0 0 0 2px var(--hit)}
 .p.sel{border-color:var(--text)}
 .detail{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
@@ -46,6 +49,15 @@ input[type=search]{flex:1;min-width:220px}
     <input type="search" id="q" placeholder="搜尋線號（如 A-3F-017）、設備、Patch panel 位置、VLAN…">
     <select id="fSw"></select>
   </div>
+  <div class="panel" id="simPanel">
+    <h2><span>自動亮燈 <small id="liveNote"></small></span>
+      <span style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="simBtn">▶ 開始模擬交換器連線變化</button>
+        <button id="simReset">還原示範狀態</button>
+      </span></h2>
+    <div class="hint" style="font-size:13px">示範用：按下開始後，會每隔幾秒讓隨機的 port 斷線或恢復。所有正在看這個頁面的人都會同時看到燈號變化。（真實環境則由內網的程式定時讀取交換器狀態寫入資料庫）</div>
+    <div id="eventLog" style="margin-top:8px;font-size:13px;font-family:ui-monospace,Menlo,monospace;color:var(--muted)"></div>
+  </div>
   <div class="legend">
     <span><i style="background:var(--up)"></i>已連線</span>
     <span><i style="background:var(--down)"></i>異常 / Link down</span>
@@ -63,7 +75,7 @@ input[type=search]{flex:1;min-width:220px}
   <div id="switches"></div>
 </div>
 
-<script src="ops-db.js?v=2"></script>
+<script src="ops-db.js?v=3"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -125,7 +137,7 @@ function render(){
     // 實體交換器上下排：上排奇數、下排偶數 → 用欄向排列
     const order=[]; for(let c=0;c<Math.ceil(s.n/2);c++){order.push(ps[c*2]); if(ps[c*2+1]) order.push(ps[c*2+1]);}
     return `<div class="panel"><h2><span>${s.id} <small>${s.model} · ${s.loc}</small></span>
-      <span class="stat"><span>已連線 <b>${cnt('up')}</b></span><span>異常 <b>${cnt('down')}</b></span><span>停用 <b>${cnt('dis')}</b></span><span>空閒 <b>${cnt('free')}</b> / ${s.n}</span></span></h2>
+      <span class="stat" data-sw="${s.id}"><span>已連線 <b>${cnt('up')}</b></span><span>異常 <b>${cnt('down')}</b></span><span>停用 <b>${cnt('dis')}</b></span><span>空閒 <b>${cnt('free')}</b> / ${s.n}</span></span></h2>
       <div class="sw"><div class="ports">${order.map(p=>{
         const k=p.sw+'|'+p.n, dim=q&&!hits.has(k);
         return `<button class="p ${p.status} ${dim?'dim':''} ${hits.has(k)?'hit':''} ${sel===k?'sel':''}" data-k="${k}" title="${esc(p.dev||'空閒')}">${p.n}</button>`}).join('')}</div></div></div>`;
@@ -170,7 +182,82 @@ render();
     render();
   }
   OPS.mark();
+  startPolling();
 })();
+
+// ---- 自動亮燈：定時讀取資料庫中的 port 狀態，只更新有變化的燈（不重畫整個畫面）----
+const STAT_KEYS=[['up','已連線'],['down','異常'],['dis','停用'],['free','空閒']];
+function updateStats(){
+  document.querySelectorAll('.stat[data-sw]').forEach(el=>{
+    const s=SWITCHES.find(x=>x.id===el.dataset.sw); if(!s) return;
+    const ps=Array.from({length:s.n},(_,i)=>ports[s.id+'|'+(i+1)]);
+    const c=k=>ps.filter(p=>p.status===k).length;
+    el.innerHTML=`<span>已連線 <b>${c('up')}</b></span><span>異常 <b>${c('down')}</b></span><span>停用 <b>${c('dis')}</b></span><span>空閒 <b>${c('free')}</b> / ${s.n}</span>`;
+  });
+}
+function logEvent(p,to){
+  const t=new Date().toLocaleTimeString('zh-TW',{hour12:false});
+  const row=document.createElement('div');
+  row.textContent=`${t}  ${p.sw} #${p.n}  →  ${STATUS_TXT[to]}`+(p.dev?`（${p.dev}）`:'');
+  row.style.color=to==='down'?'var(--down)':'var(--up)';
+  const box=$('eventLog'); box.prepend(row); while(box.children.length>5) box.lastChild.remove();
+}
+// 套用狀態變化到畫面（in-place）
+function applyStatus(k,to,{log=true}={}){
+  const p=ports[k]; if(!p||p.status===to) return false;
+  const from=p.status; p.status=to;
+  const b=document.querySelector(`.p[data-k="${k}"]`);
+  if(b){ b.classList.remove('up','down','dis','free'); b.classList.add(to); b.classList.remove('flash'); void b.offsetWidth; b.classList.add('flash'); }
+  if(log && from!=='free' && to!=='free') logEvent(p,to);
+  if(sel===k) showDetail(k);
+  return true;
+}
+let pollTimer=null;
+async function pollOnce(){
+  const r=await OPS.select('ops_ports','select=switch_id,port_no,status&limit=2000');
+  if(!r) return;
+  let changed=false;
+  r.forEach(x=>{ if(applyStatus(x.switch_id+'|'+x.port_no,x.status)) changed=true; });
+  if(changed) updateStats();
+}
+function startPolling(){
+  if(!OPS.live||pollTimer) return;
+  $('liveNote').innerHTML='<span class="live-dot"></span>每 3 秒自動更新';
+  pollTimer=setInterval(pollOnce,3000);
+}
+
+// ---- 模擬交換器：隨機讓有接設備的 port 斷線 / 恢復 ----
+let simTimer=null;
+async function simStep(){
+  const cand=Object.values(ports).filter(p=>p.dev&&(p.status==='up'||p.status==='down')&&p.vlan!=='Trunk');
+  if(!cand.length) return;
+  const n=1+Math.floor(Math.random()*2);
+  const picked=[...cand].sort(()=>Math.random()-.5).slice(0,n);   // 同一輪不重複選同一個 port
+  for(const p of picked){
+    const k=p.sw+'|'+p.n;
+    const to=p.status==='up'?'down':'up';
+    applyStatus(k,to); updateStats();
+    if(OPS.live) await OPS.patchWhere('ops_ports',`switch_id=eq.${encodeURIComponent(p.sw)}&port_no=eq.${p.n}`,{status:to});
+  }
+}
+$('simBtn').onclick=()=>{
+  if(simTimer){ clearInterval(simTimer); simTimer=null; $('simBtn').textContent='▶ 開始模擬交換器連線變化'; return; }
+  simStep(); simTimer=setInterval(simStep,3500); $('simBtn').textContent='■ 停止模擬';
+};
+// 還原：只有三個示範異常 port 保持 down，其餘有接設備的 port 都恢復 up
+const BASE_DOWN=[['SW-3F-01',9],['SW-4F-01',5],['CORE-01',11]];
+$('simReset').onclick=async()=>{
+  if(simTimer){ clearInterval(simTimer); simTimer=null; $('simBtn').textContent='▶ 開始模擬交換器連線變化'; }
+  if(OPS.live){
+    await OPS.patchWhere('ops_ports','status=eq.down',{status:'up'});
+    for(const [sw,n] of BASE_DOWN) await OPS.patchWhere('ops_ports',`switch_id=eq.${sw}&port_no=eq.${n}`,{status:'down'});
+  }
+  Object.values(ports).forEach(p=>{
+    const base=BASE_DOWN.some(([sw,n])=>sw===p.sw&&n===p.n)?'down':(p.status==='down'?'up':p.status);
+    applyStatus(p.sw+'|'+p.n,base,{log:false});
+  });
+  updateStats(); $('eventLog').innerHTML='';
+};
 </script>
 </body>
 </html>

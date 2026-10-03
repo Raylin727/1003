@@ -83,8 +83,22 @@ tr:last-child td{border-bottom:0}
     <input type="search" id="q" placeholder="搜尋設備名稱、型號、位置、廠商…">
     <select id="fLoc"></select>
     <select id="fVendor"></select>
+    <button class="btn" id="addBtn" style="background:var(--accent);border-color:var(--accent);color:#fff">＋ 新增設備</button>
     <button class="btn" id="exportBtn">匯出 CSV</button>
-    <label class="btn" style="cursor:pointer">匯入 CSV<input type="file" id="importFile" accept=".csv" hidden></label>
+    <label class="btn" style="cursor:pointer" title="匯入的資料只在目前畫面預覽，不會儲存；重新整理即還原">匯入 CSV（僅預覽）<input type="file" id="importFile" accept=".csv" hidden></label>
+  </div>
+
+  <div class="panel" id="devPanel" hidden>
+    <h2 id="devTitle">新增設備</h2>
+    <form id="devForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;align-items:end">
+      <label style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:3px">設備名稱<input name="name" required></label>
+      <label style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:3px">型號<input name="model" required></label>
+      <label style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:3px">位置<input name="loc" required></label>
+      <label style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:3px">廠商<input name="vendor" required></label>
+      <label style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:3px">購買日<input type="date" name="bought" required></label>
+      <label style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:3px">保固到期日<input type="date" name="expire" required></label>
+      <div style="display:flex;gap:8px"><button class="btn" type="submit" style="background:var(--accent);border-color:var(--accent);color:#fff">儲存</button><button class="btn" type="button" id="devCancel">取消</button></div>
+    </form>
   </div>
 
   <div class="tablewrap">
@@ -97,7 +111,7 @@ tr:last-child td{border-bottom:0}
   <p class="foot" id="foot"></p>
 </div>
 
-<script src="ops-db.js?v=2"></script>
+<script src="ops-db.js?v=3"></script>
 <script>
 const DAY = 86400000;
 const today = new Date(); today.setHours(0,0,0,0);
@@ -211,12 +225,13 @@ function renderTable(list){
   const val = r => state.sort==='days'?daysLeft(r) : state.sort==='status'?daysLeft(r) : r[state.sort];
   shown.sort((a,b)=>{ const x=val(a),y=val(b); return (x>y?1:x<y?-1:0)*state.dir; });
   $('head').innerHTML = cols.map(([k,l])=>
-    `<th data-k="${k}">${l}${state.sort===k?(state.dir>0?' ▲':' ▼'):''}</th>`).join('');
+    `<th data-k="${k}">${l}${state.sort===k?(state.dir>0?' ▲':' ▼'):''}</th>`).join('') + '<th></th>';
   $('body').innerHTML = shown.map(r=>{
-    const d=daysLeft(r), s=STATUS[statusOf(r)];
+    const d=daysLeft(r), s=STATUS[statusOf(r)], i=rows.indexOf(r);
     return `<tr><td><b>${esc(r.name)}</b></td><td>${esc(r.model)}</td><td>${esc(r.loc)}</td><td>${esc(r.vendor)}</td>
       <td>${r.bought}</td><td>${r.expire}</td><td>${d<0?`逾期 ${-d} 天`:`${d} 天`}</td>
-      <td><span class="badge ${s.cls}">${s.label}</span></td></tr>`;
+      <td><span class="badge ${s.cls}">${s.label}</span></td>
+      <td><button class="btn" data-edit="${i}" style="padding:2px 8px">編輯</button> <button class="btn" data-del="${i}" style="padding:2px 8px">刪除</button></td></tr>`;
   }).join('');
   $('empty').hidden = shown.length>0;
   $('foot').textContent = `顯示 ${shown.length} / ${rows.length} 台設備`;
@@ -308,11 +323,49 @@ fillSelects(); render();
 (async () => {
   const r = await OPS.select('ops_devices', 'order=expire.asc');
   if (r) {
-    rows = r.map(d => ({name:d.name, model:d.model, loc:d.location, vendor:d.vendor, bought:d.bought, expire:d.expire}));
+    rows = r.map(d => ({id:d.id, name:d.name, model:d.model, loc:d.location, vendor:d.vendor, bought:d.bought, expire:d.expire}));
     fillSelects(); render();
   }
   OPS.mark();
 })();
+
+// 新增 / 編輯 / 刪除設備（連線時同步寫入資料庫）
+let editing = -1;
+function openForm(i){
+  editing = i; const f = $('devForm');
+  f.reset();
+  if(i>=0){ const r=rows[i]; for(const k of ['name','model','loc','vendor','bought','expire']) f[k].value=r[k]; }
+  else { f.bought.value = iso(today); f.expire.value = addDays(365*3); }
+  $('devTitle').textContent = i>=0 ? `編輯設備：${rows[i].name}` : '新增設備';
+  $('devPanel').hidden = false; $('devPanel').scrollIntoView({behavior:'smooth',block:'center'});
+}
+$('addBtn').onclick = () => openForm(-1);
+$('devCancel').onclick = () => { $('devPanel').hidden = true; };
+$('devForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const v = Object.fromEntries(new FormData(e.target));
+  if(v.expire < v.bought) return alert('保固到期日不能早於購買日');
+  const item = {name:v.name.trim(), model:v.model.trim(), loc:v.loc.trim(), vendor:v.vendor.trim(), bought:v.bought, expire:v.expire};
+  const dbRow = {name:item.name, model:item.model, location:item.loc, vendor:item.vendor, bought:item.bought, expire:item.expire};
+  if(editing>=0){
+    const old = rows[editing];
+    if(OPS.live && old.id && !(await OPS.patch('ops_devices', old.id, dbRow))) return OPS.fail('儲存失敗');
+    rows[editing] = {...old, ...item};
+  } else {
+    if(OPS.live){ const row = await OPS.insert('ops_devices', dbRow); if(!row) return OPS.fail('新增失敗'); item.id = row.id; }
+    rows.push(item);
+  }
+  $('devPanel').hidden = true; fillSelects(); render();
+});
+$('body').addEventListener('click', async e => {
+  const ed = e.target.dataset.edit, del = e.target.dataset.del;
+  if(ed !== undefined) return openForm(+ed);
+  if(del === undefined) return;
+  const r = rows[+del];
+  if(!confirm(`確定要刪除「${r.name}」嗎？`)) return;
+  if(OPS.live && r.id && !(await OPS.remove('ops_devices', 'id=eq.'+r.id))) return OPS.fail('刪除失敗');
+  rows.splice(+del, 1); fillSelects(); render();
+});
 </script>
 </body>
 </html>
